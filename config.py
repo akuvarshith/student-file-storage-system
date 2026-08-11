@@ -31,6 +31,13 @@ class Config:
 
     # Presigned download links expire after this many seconds.
     PRESIGNED_URL_EXPIRY = 300  # 5 minutes
+# --- Password reset (forgot password) ---
+    MAIL_SERVER = os.environ.get('MAIL_SERVER', 'smtp.gmail.com')
+    MAIL_PORT = int(os.environ.get('MAIL_PORT', 587))
+    MAIL_USERNAME = os.environ.get('MAIL_USERNAME', '')
+    MAIL_PASSWORD = os.environ.get('MAIL_PASSWORD', '')
+    MAIL_DEFAULT_SENDER = os.environ.get('MAIL_DEFAULT_SENDER', MAIL_USERNAME)
+    RESET_TOKEN_EXPIRY = 1800  # 30 minutes
 
     # Session cookie hardening: JavaScript can never read the cookie,
     # and it is not sent on most cross-site requests. See Part P for

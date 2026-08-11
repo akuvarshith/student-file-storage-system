@@ -18,7 +18,13 @@
             <td>{{ f['original_filename'] }}</td>
             <td>{{ f['upload_date'] }}</td>
             <td>{{ (f['file_size'] / 1024) | round(1) }} KB</td>
-            <td><a class="btn btn-small" href="{{ url_for('download', file_id=f['id']) }}">Download</a></td>
+            <td>
+    {% set ext = f['original_filename'].rsplit('.', 1)[-1] | lower %}
+    {% if ext in ['pdf', 'png', 'jpg', 'jpeg', 'txt'] %}
+        <a class="btn btn-small" href="{{ url_for('view_file', file_id=f['id']) }}" target="_blank">View</a>
+    {% endif %}
+    <a class="btn btn-small btn-secondary" href="{{ url_for('download', file_id=f['id']) }}">Download</a>
+</td>
         </tr>
         {% endfor %}
     </tbody>

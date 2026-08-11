@@ -1,6 +1,8 @@
 import os
 import uuid
 from functools import wraps
+import smtplib
+from email.mime.text import MIMEText
 
 from flask import (
     Flask, render_template, request, redirect,
@@ -9,6 +11,8 @@ from flask import (
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 import boto3
+from itsdangerous import URLSafeTimedSerializer, SignatureExpired, BadSignature
+
 from botocore.exceptions import ClientError, BotoCoreError
 from botocore.config import Config as BotoConfig
 
@@ -30,6 +34,24 @@ s3_client = boto3.client(
         }
     )
 )
+
+reset_serializer = URLSafeTimedSerializer(app.config['SECRET_KEY'])
+
+
+def send_reset_email(to_email, reset_url):
+    """Send the password reset link via SMTP."""
+    msg = MIMEText(
+        f'Click the link below to reset your password:\n\n{reset_url}\n\n'
+        'This link expires in 30 minutes. If you did not request this, ignore this email.'
+    )
+    msg['Subject'] = 'Reset your Student File Storage password'
+    msg['From'] = app.config['MAIL_DEFAULT_SENDER']
+    msg['To'] = to_email
+
+    with smtplib.SMTP(app.config['MAIL_SERVER'], app.config['MAIL_PORT']) as server:
+        server.starttls()
+        server.login(app.config['MAIL_USERNAME'], app.config['MAIL_PASSWORD'])
+        server.sendmail(app.config['MAIL_DEFAULT_SENDER'], [to_email], msg.as_string())
 
 # ---------------------------------------------------------------------
 # Helpers
@@ -154,6 +176,65 @@ def logout():
     flash('You have been logged out.')
     return redirect(url_for('index'))
 
+# ---------------------------------------------------------------------
+# Password Reset
+# ---------------------------------------------------------------------
+
+@app.route('/forgot-password', methods=['GET', 'POST'])
+def forgot_password():
+    if request.method == 'POST':
+        email = request.form.get('email', '').strip().lower()
+        db = database.get_db()
+        user = db.execute('SELECT * FROM users WHERE email = ?', (email,)).fetchone()
+
+        # Same message either way — never reveal which emails are registered.
+        if user is not None:
+            token = reset_serializer.dumps(email, salt='password-reset')
+            reset_url = url_for('reset_password', token=token, _external=True)
+            try:
+                send_reset_email(email, reset_url)
+            except Exception as e:
+                flash(f'Could not send reset email: {e}')
+                return redirect(url_for('forgot_password'))
+
+        flash('If that email is registered, a reset link has been sent.')
+        return redirect(url_for('login'))
+
+    return render_template('forgot_password.html')
+
+
+@app.route('/reset-password/<token>', methods=['GET', 'POST'])
+def reset_password(token):
+    try:
+        email = reset_serializer.loads(
+            token, salt='password-reset', max_age=app.config['RESET_TOKEN_EXPIRY']
+        )
+    except SignatureExpired:
+        flash('That reset link has expired. Please request a new one.')
+        return redirect(url_for('forgot_password'))
+    except BadSignature:
+        flash('That reset link is invalid.')
+        return redirect(url_for('forgot_password'))
+
+    if request.method == 'POST':
+        password = request.form.get('password', '')
+        confirm = request.form.get('confirm_password', '')
+
+        if not password or len(password) < 6:
+            flash('Password must be at least 6 characters long.')
+            return render_template('reset_password.html', token=token)
+        if password != confirm:
+            flash('Passwords do not match.')
+            return render_template('reset_password.html', token=token)
+
+        db = database.get_db()
+        db.execute('UPDATE users SET password_hash = ? WHERE email = ?',
+                   (generate_password_hash(password), email))
+        db.commit()
+        flash('Your password has been reset. Please log in.')
+        return redirect(url_for('login'))
+
+    return render_template('reset_password.html', token=token)
 
 # ---------------------------------------------------------------------
 # Dashboard
@@ -284,6 +365,46 @@ def download(file_id):
 
     return redirect(presigned_url)
 
+# ---------------------------------------------------------------------
+# View (Preview in Browser)
+# ---------------------------------------------------------------------
+
+PREVIEWABLE_EXTENSIONS = {'pdf', 'png', 'jpg', 'jpeg', 'txt'}
+
+
+@app.route('/view/<int:file_id>')
+@login_required
+def view_file(file_id):
+    db = database.get_db()
+    file_record = db.execute(
+        'SELECT * FROM files WHERE id = ? AND user_id = ?',
+        (file_id, session['user_id'])
+    ).fetchone()
+
+    if file_record is None:
+        abort(404)
+
+    extension = file_record['original_filename'].rsplit('.', 1)[-1].lower()
+    if extension not in PREVIEWABLE_EXTENSIONS:
+        flash('This file type cannot be previewed online. Please download it instead.')
+        return redirect(url_for('my_files'))
+
+    try:
+        presigned_url = s3_client.generate_presigned_url(
+            'get_object',
+            Params={
+                'Bucket': app.config['S3_BUCKET'],
+                'Key': file_record['s3_key'],
+                'ResponseContentDisposition':
+                    f'inline; filename="{file_record["original_filename"]}"'
+            },
+            ExpiresIn=app.config['PRESIGNED_URL_EXPIRY']
+        )
+    except (ClientError, BotoCoreError) as e:
+        flash(f'Could not generate a preview link: {e}')
+        return redirect(url_for('my_files'))
+
+    return redirect(presigned_url)
 
 # ---------------------------------------------------------------------
 # Error handlers
