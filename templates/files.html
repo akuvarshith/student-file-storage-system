@@ -1,0 +1,29 @@
+{% extends 'base.html' %}
+{% block title %}My Files{% endblock %}
+{% block content %}
+<h1>My Files</h1>
+{% if files %}
+<table class="files-table">
+    <thead>
+        <tr>
+            <th>File Name</th>
+            <th>Uploaded On</th>
+            <th>Size</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for f in files %}
+        <tr>
+            <td>{{ f['original_filename'] }}</td>
+            <td>{{ f['upload_date'] }}</td>
+            <td>{{ (f['file_size'] / 1024) | round(1) }} KB</td>
+            <td><a class="btn btn-small" href="{{ url_for('download', file_id=f['id']) }}">Download</a></td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p>You haven't uploaded any files yet. <a href="{{ url_for('upload') }}">Upload your first file</a>.</p>
+{% endif %}
+{% endblock %}

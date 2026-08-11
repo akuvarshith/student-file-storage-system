@@ -1,0 +1,43 @@
+import os
+from dotenv import load_dotenv
+
+# Load variables from a .env file in the project root, if one exists.
+load_dotenv()
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+class Config:
+    # Flask's session cookie signing key. MUST be overridden in .env
+    # with a long random value before deployment — see Section 9.8.
+    SECRET_KEY = os.environ.get('SECRET_KEY', 'dev-only-insecure-key')
+
+    # SQLite database file lives right next to this config file.
+    DATABASE = os.path.join(BASE_DIR, 'site.db')
+
+    # S3 settings — must match the bucket you created in Part C.
+    S3_BUCKET = os.environ.get('S3_BUCKET', '')
+    S3_REGION = os.environ.get('S3_REGION', 'ap-south-1')
+
+    # Reject uploads larger than 16 MB outright, before they even
+    # reach our upload logic. Flask enforces this automatically.
+    MAX_CONTENT_LENGTH = 16 * 1024 * 1024
+
+    # Only these file extensions may be uploaded.
+    ALLOWED_EXTENSIONS = {
+        'pdf', 'doc', 'docx', 'ppt', 'pptx',
+        'xls', 'xlsx', 'txt', 'png', 'jpg', 'jpeg', 'zip'
+    }
+
+    # Presigned download links expire after this many seconds.
+    PRESIGNED_URL_EXPIRY = 300  # 5 minutes
+
+    # Session cookie hardening: JavaScript can never read the cookie,
+    # and it is not sent on most cross-site requests. See Part P for
+    # why SESSION_COOKIE_SECURE is deliberately NOT set here.
+    SESSION_COOKIE_HTTPONLY = True
+    SESSION_COOKIE_SAMESITE = 'Lax'
+
+    # Whether Flask's interactive debugger and auto-reloader are on.
+    # Controlled by FLASK_DEBUG in .env — MUST be "0" once deployed.
+    DEBUG = os.environ.get('FLASK_DEBUG', '0') == '1'

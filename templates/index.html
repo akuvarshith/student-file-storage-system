@@ -1,0 +1,14 @@
+{% extends 'base.html' %}
+{% block title %}Welcome{% endblock %}
+{% block content %}
+<div class="hero">
+    <h1>Store your assignments and notes in the cloud</h1>
+    <p>Register for a free account, upload your files, and access them from anywhere.</p>
+    {% if not g.user %}
+        <a class="btn" href="{{ url_for('register') }}">Get Started</a>
+        <a class="btn btn-secondary" href="{{ url_for('login') }}">Log In</a>
+    {% else %}
+        <a class="btn" href="{{ url_for('dashboard') }}">Go to Dashboard</a>
+    {% endif %}
+</div>
+{% endblock %}

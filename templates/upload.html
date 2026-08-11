@@ -1,0 +1,11 @@
+{% extends 'base.html' %}
+{% block title %}Upload File{% endblock %}
+{% block content %}
+<h1>Upload a File</h1>
+<form method="post" enctype="multipart/form-data" class="form">
+    <label for="file">Choose File</label>
+    <input type="file" id="file" name="file" required>
+    <button type="submit" class="btn">Upload</button>
+</form>
+<p class="hint">Allowed types: pdf, doc, docx, ppt, pptx, xls, xlsx, txt, png, jpg, jpeg, zip. Maximum size: 16&nbsp;MB.</p>
+{% endblock %}

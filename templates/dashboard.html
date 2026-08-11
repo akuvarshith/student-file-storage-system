@@ -1,0 +1,10 @@
+{% extends 'base.html' %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+<h1>Welcome, {{ g.user['name'] }}</h1>
+<p>You currently have <strong>{{ file_count }}</strong> file(s) stored.</p>
+<div class="dashboard-links">
+    <a class="btn" href="{{ url_for('upload') }}">Upload a New File</a>
+    <a class="btn btn-secondary" href="{{ url_for('my_files') }}">View My Files</a>
+</div>
+{% endblock %}
