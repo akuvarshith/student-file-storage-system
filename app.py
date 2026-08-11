@@ -1,4 +1,5 @@
 import os
+import mimetypes
 import uuid
 from functools import wraps
 import smtplib
@@ -389,6 +390,10 @@ def view_file(file_id):
         flash('This file type cannot be previewed online. Please download it instead.')
         return redirect(url_for('my_files'))
 
+    content_type, _ = mimetypes.guess_type(file_record['original_filename'])
+    if content_type is None:
+        content_type = 'application/octet-stream'
+
     try:
         presigned_url = s3_client.generate_presigned_url(
             'get_object',
@@ -396,7 +401,8 @@ def view_file(file_id):
                 'Bucket': app.config['S3_BUCKET'],
                 'Key': file_record['s3_key'],
                 'ResponseContentDisposition':
-                    f'inline; filename="{file_record["original_filename"]}"'
+                    f'inline; filename="{file_record["original_filename"]}"',
+                'ResponseContentType': content_type
             },
             ExpiresIn=app.config['PRESIGNED_URL_EXPIRY']
         )
