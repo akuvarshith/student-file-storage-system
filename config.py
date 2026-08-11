@@ -31,6 +31,14 @@ class Config:
 
     # Presigned download links expire after this many seconds.
     PRESIGNED_URL_EXPIRY = 300  # 5 minutes
+
+    # Categories a file can be organized under. Used by the upload
+    # form, the "My Files" filter dropdown, and the edit-file page.
+    FILE_CATEGORIES = ['Assignment', 'Notes', 'Project', 'Reference', 'Other']
+
+    # Purely informational storage bar shown on the dashboard. This is
+    # NOT enforced anywhere -- uploads are never blocked because of it.
+    STORAGE_QUOTA_DISPLAY = 200 * 1024 * 1024  # 200 MB
 # --- Password reset (forgot password) ---
     MAIL_SERVER = os.environ.get('MAIL_SERVER', 'smtp.gmail.com')
     MAIL_PORT = int(os.environ.get('MAIL_PORT', 587))

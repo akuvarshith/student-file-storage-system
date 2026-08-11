@@ -1,0 +1,39 @@
+{% extends 'base.html' %}
+{% block title %}Trash{% endblock %}
+{% block content %}
+<h1>Trash</h1>
+<p class="hint">Files here aren't shown in "My Files" and any share links for them stop working. Restore them or delete them permanently.</p>
+{% if files %}
+<table class="files-table">
+    <thead>
+        <tr>
+            <th>File Name</th>
+            <th>Deleted On</th>
+            <th>Size</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for f in files %}
+        <tr>
+            <td>{{ f['original_filename'] }}</td>
+            <td>{{ f['deleted_at'] }}</td>
+            <td>{{ (f['file_size'] / 1024) | round(1) }} KB</td>
+            <td class="actions-cell">
+                <form method="post" action="{{ url_for('restore_file', file_id=f['id']) }}" class="inline-form">
+                    <button type="submit" class="btn btn-small">Restore</button>
+                </form>
+                <form method="post" action="{{ url_for('purge_file', file_id=f['id']) }}" class="inline-form"
+                      onsubmit="return confirm('Permanently delete this file? This cannot be undone.');">
+                    <button type="submit" class="btn btn-small btn-danger">Delete Forever</button>
+                </form>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p>Trash is empty.</p>
+{% endif %}
+<p><a href="{{ url_for('my_files') }}">Back to My Files</a></p>
+{% endblock %}

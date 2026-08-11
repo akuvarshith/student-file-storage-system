@@ -2,11 +2,47 @@
 {% block title %}My Files{% endblock %}
 {% block content %}
 <h1>My Files</h1>
+
+<form method="get" class="filter-bar">
+    <input type="text" name="q" placeholder="Search by file name..." value="{{ q }}">
+
+    <select name="category">
+        <option value="">All Categories</option>
+        {% for c in categories %}
+        <option value="{{ c }}" {% if c == category %}selected{% endif %}>{{ c }}</option>
+        {% endfor %}
+    </select>
+
+    <select name="ext">
+        <option value="">All Types</option>
+        {% for e in ['pdf','doc','docx','ppt','pptx','xls','xlsx','txt','png','jpg','jpeg','zip'] %}
+        <option value="{{ e }}" {% if e == ext %}selected{% endif %}>{{ e }}</option>
+        {% endfor %}
+    </select>
+
+    <select name="sort">
+        <option value="newest" {% if sort == 'newest' %}selected{% endif %}>Newest first</option>
+        <option value="oldest" {% if sort == 'oldest' %}selected{% endif %}>Oldest first</option>
+        <option value="name" {% if sort == 'name' %}selected{% endif %}>Name (A-Z)</option>
+        <option value="size" {% if sort == 'size' %}selected{% endif %}>Largest first</option>
+    </select>
+
+    <label class="checkbox-label">
+        <input type="checkbox" name="favorites" value="1" {% if favorites_only %}checked{% endif %}>
+        Favorites only
+    </label>
+
+    <button type="submit" class="btn btn-small">Apply</button>
+    <a class="btn btn-small btn-secondary" href="{{ url_for('my_files') }}">Reset</a>
+</form>
+
 {% if files %}
 <table class="files-table">
     <thead>
         <tr>
+            <th></th>
             <th>File Name</th>
+            <th>Category</th>
             <th>Uploaded On</th>
             <th>Size</th>
             <th></th>
@@ -15,21 +51,41 @@
     <tbody>
         {% for f in files %}
         <tr>
+            <td>
+                <form method="post" action="{{ url_for('toggle_favorite', file_id=f['id']) }}" class="inline-form">
+                    <button type="submit" class="star-btn" title="Toggle favorite">{% if f['is_favorite'] %}&#9733;{% else %}&#9734;{% endif %}</button>
+                </form>
+            </td>
             <td>{{ f['original_filename'] }}</td>
+            <td><span class="badge">{{ f['category'] }}</span></td>
             <td>{{ f['upload_date'] }}</td>
             <td>{{ (f['file_size'] / 1024) | round(1) }} KB</td>
-            <td>
+            <td class="actions-cell">
     {% set ext = f['original_filename'].rsplit('.', 1)[-1] | lower %}
     {% if ext in ['pdf', 'png', 'jpg', 'jpeg', 'txt'] %}
         <a class="btn btn-small" href="{{ url_for('view_file', file_id=f['id']) }}" target="_blank">View</a>
     {% endif %}
     <a class="btn btn-small btn-secondary" href="{{ url_for('download', file_id=f['id']) }}">Download</a>
+    <a class="btn btn-small btn-secondary" href="{{ url_for('manage_share', file_id=f['id']) }}">Share</a>
+    <a class="btn btn-small btn-secondary" href="{{ url_for('edit_file', file_id=f['id']) }}">Edit</a>
+    <form method="post" action="{{ url_for('delete_file', file_id=f['id']) }}" class="inline-form"
+          onsubmit="return confirm('Move this file to Trash?');">
+        <button type="submit" class="btn btn-small btn-danger">Delete</button>
+    </form>
 </td>
         </tr>
         {% endfor %}
     </tbody>
 </table>
 {% else %}
-<p>You haven't uploaded any files yet. <a href="{{ url_for('upload') }}">Upload your first file</a>.</p>
+<p>
+{% if q or category or ext or favorites_only %}
+    No files match your search or filters. <a href="{{ url_for('my_files') }}">Clear filters</a>.
+{% else %}
+    You haven't uploaded any files yet. <a href="{{ url_for('upload') }}">Upload your first file</a>.
 {% endif %}
+</p>
+{% endif %}
+
+<p class="hint"><a href="{{ url_for('trash') }}">View Trash</a></p>
 {% endblock %}

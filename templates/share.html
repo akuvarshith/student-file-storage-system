@@ -1,0 +1,36 @@
+{% extends 'base.html' %}
+{% block title %}Share File{% endblock %}
+{% block content %}
+<h1>Share "{{ file['original_filename'] }}"</h1>
+
+{% if active_share %}
+<div class="share-box">
+    <p>Anyone with this link can view or download this file until it expires or you revoke it.</p>
+    <input type="text" class="share-link-input" value="{{ share_url }}" readonly onclick="this.select();">
+    <p class="hint">
+        {% if active_share['expires_at'] %}
+            Expires: {{ active_share['expires_at'] }}
+        {% else %}
+            Never expires.
+        {% endif %}
+        &middot; Accessed {{ active_share['access_count'] }} time(s).
+    </p>
+    <form method="post" action="{{ url_for('revoke_share', file_id=file['id']) }}" class="inline-form">
+        <button type="submit" class="btn btn-danger">Revoke Link</button>
+    </form>
+</div>
+{% else %}
+<form method="post" class="form">
+    <label for="expires_in">Link Expiry</label>
+    <select id="expires_in" name="expires_in">
+        <option value="1h">1 hour</option>
+        <option value="1d">1 day</option>
+        <option value="7d" selected>7 days</option>
+        <option value="never">Never</option>
+    </select>
+    <button type="submit" class="btn">Create Share Link</button>
+</form>
+{% endif %}
+
+<p><a href="{{ url_for('my_files') }}">Back to My Files</a></p>
+{% endblock %}

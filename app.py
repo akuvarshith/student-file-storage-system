@@ -1,6 +1,8 @@
 import os
 import mimetypes
 import uuid
+import secrets
+from datetime import datetime, timedelta
 from functools import wraps
 import smtplib
 from email.mime.text import MIMEText
@@ -246,10 +248,34 @@ def reset_password(token):
 def dashboard():
     db = database.get_db()
     file_count = db.execute(
-        'SELECT COUNT(*) AS c FROM files WHERE user_id = ?',
+        'SELECT COUNT(*) AS c FROM files WHERE user_id = ? AND deleted_at IS NULL',
         (session['user_id'],)
     ).fetchone()['c']
-    return render_template('dashboard.html', file_count=file_count)
+
+    storage_used = db.execute(
+        'SELECT COALESCE(SUM(file_size), 0) AS total FROM files '
+        'WHERE user_id = ? AND deleted_at IS NULL',
+        (session['user_id'],)
+    ).fetchone()['total']
+
+    category_breakdown = db.execute(
+        'SELECT category, COUNT(*) AS c FROM files '
+        'WHERE user_id = ? AND deleted_at IS NULL '
+        'GROUP BY category ORDER BY c DESC',
+        (session['user_id'],)
+    ).fetchall()
+
+    quota = app.config['STORAGE_QUOTA_DISPLAY']
+    storage_percent = min(100, round((storage_used / quota) * 100, 1)) if quota else 0
+
+    return render_template(
+        'dashboard.html',
+        file_count=file_count,
+        storage_used=storage_used,
+        storage_quota=quota,
+        storage_percent=storage_percent,
+        category_breakdown=category_breakdown
+    )
 
 
 # ---------------------------------------------------------------------
@@ -280,6 +306,10 @@ def upload():
             f"{uuid.uuid4().hex}_{original_filename}"
         )
 
+        category = request.form.get('category', 'Other')
+        if category not in app.config['FILE_CATEGORIES']:
+            category = 'Other'
+
         # Determine the file size BEFORE handing the stream to boto3.
         # Some versions of boto3/s3transfer close the underlying file
         # object once the upload finishes (this varies by Python and
@@ -304,31 +334,68 @@ def upload():
         db = database.get_db()
         db.execute(
             'INSERT INTO files '
-            '(user_id, original_filename, s3_key, file_size) '
-            'VALUES (?, ?, ?, ?)',
-            (session['user_id'], original_filename, unique_key, file_size)
+            '(user_id, original_filename, s3_key, file_size, category) '
+            'VALUES (?, ?, ?, ?, ?)',
+            (session['user_id'], original_filename, unique_key, file_size, category)
         )
         db.commit()
 
         flash(f'"{original_filename}" was uploaded successfully.')
         return redirect(url_for('my_files'))
 
-    return render_template('upload.html')
+    return render_template('upload.html', categories=app.config['FILE_CATEGORIES'])
 
 
 # ---------------------------------------------------------------------
 # My Files
 # ---------------------------------------------------------------------
 
+SORT_OPTIONS = {
+    'newest': 'upload_date DESC',
+    'oldest': 'upload_date ASC',
+    'name': 'original_filename COLLATE NOCASE ASC',
+    'size': 'file_size DESC',
+}
+
+
 @app.route('/files')
 @login_required
 def my_files():
     db = database.get_db()
-    files = db.execute(
-        'SELECT * FROM files WHERE user_id = ? ORDER BY upload_date DESC',
-        (session['user_id'],)
-    ).fetchall()
-    return render_template('files.html', files=files)
+
+    q = request.args.get('q', '').strip()
+    category = request.args.get('category', '').strip()
+    ext = request.args.get('ext', '').strip().lower()
+    favorites_only = request.args.get('favorites') == '1'
+    sort = request.args.get('sort', 'newest')
+    if sort not in SORT_OPTIONS:
+        sort = 'newest'
+
+    query = 'SELECT * FROM files WHERE user_id = ? AND deleted_at IS NULL'
+    params = [session['user_id']]
+
+    if q:
+        query += ' AND original_filename LIKE ?'
+        params.append(f'%{q}%')
+    if category:
+        query += ' AND category = ?'
+        params.append(category)
+    if ext:
+        query += ' AND LOWER(original_filename) LIKE ?'
+        params.append(f'%.{ext}')
+    if favorites_only:
+        query += ' AND is_favorite = 1'
+
+    query += ' ORDER BY ' + SORT_OPTIONS[sort]
+
+    files = db.execute(query, params).fetchall()
+    return render_template(
+        'files.html',
+        files=files,
+        categories=app.config['FILE_CATEGORIES'],
+        q=q, category=category, ext=ext,
+        favorites_only=favorites_only, sort=sort
+    )
 
 
 # ---------------------------------------------------------------------
@@ -411,6 +478,339 @@ def view_file(file_id):
         return redirect(url_for('my_files'))
 
     return redirect(presigned_url)
+
+# ---------------------------------------------------------------------
+# Favorites
+# ---------------------------------------------------------------------
+
+@app.route('/files/<int:file_id>/favorite', methods=['POST'])
+@login_required
+def toggle_favorite(file_id):
+    db = database.get_db()
+    file_record = db.execute(
+        'SELECT * FROM files WHERE id = ? AND user_id = ? AND deleted_at IS NULL',
+        (file_id, session['user_id'])
+    ).fetchone()
+
+    if file_record is None:
+        abort(404)
+
+    new_value = 0 if file_record['is_favorite'] else 1
+    db.execute('UPDATE files SET is_favorite = ? WHERE id = ?', (new_value, file_id))
+    db.commit()
+
+    # Bounce back to wherever the star was clicked from (e.g. "My
+    # Files" with an active search/filter still in the query string).
+    return redirect(request.referrer or url_for('my_files'))
+
+
+# ---------------------------------------------------------------------
+# Edit (rename + recategorize)
+# ---------------------------------------------------------------------
+
+@app.route('/files/<int:file_id>/edit', methods=['GET', 'POST'])
+@login_required
+def edit_file(file_id):
+    db = database.get_db()
+    file_record = db.execute(
+        'SELECT * FROM files WHERE id = ? AND user_id = ? AND deleted_at IS NULL',
+        (file_id, session['user_id'])
+    ).fetchone()
+
+    if file_record is None:
+        abort(404)
+
+    if request.method == 'POST':
+        new_category = request.form.get('category', 'Other')
+        original_ext = file_record['original_filename'].rsplit('.', 1)[-1].lower()
+        new_name = secure_filename(request.form.get('filename', '').strip())
+
+        error = None
+        if not new_name:
+            error = 'Please enter a valid file name.'
+        elif '.' not in new_name or new_name.rsplit('.', 1)[-1].lower() != original_ext:
+            # The S3 object and its content-type never change on rename,
+            # so we don't allow the extension to change either -- that
+            # keeps "View" and "Download" working correctly afterwards.
+            error = f"The file type can't be changed \u2014 the name must still end in .{original_ext}."
+        elif new_category not in app.config['FILE_CATEGORIES']:
+            error = 'Please choose a valid category.'
+
+        if error is None:
+            db.execute(
+                'UPDATE files SET original_filename = ?, category = ? WHERE id = ?',
+                (new_name, new_category, file_id)
+            )
+            db.commit()
+            flash('File updated.')
+            return redirect(url_for('my_files'))
+
+        flash(error)
+
+    return render_template(
+        'edit.html', file=file_record, categories=app.config['FILE_CATEGORIES']
+    )
+
+
+# ---------------------------------------------------------------------
+# Trash (soft delete / restore / permanent delete)
+# ---------------------------------------------------------------------
+
+@app.route('/files/<int:file_id>/delete', methods=['POST'])
+@login_required
+def delete_file(file_id):
+    db = database.get_db()
+    file_record = db.execute(
+        'SELECT * FROM files WHERE id = ? AND user_id = ? AND deleted_at IS NULL',
+        (file_id, session['user_id'])
+    ).fetchone()
+
+    if file_record is None:
+        abort(404)
+
+    db.execute('UPDATE files SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?', (file_id,))
+    db.commit()
+    flash(f'"{file_record["original_filename"]}" was moved to Trash.')
+    return redirect(url_for('my_files'))
+
+
+@app.route('/trash')
+@login_required
+def trash():
+    db = database.get_db()
+    files = db.execute(
+        'SELECT * FROM files WHERE user_id = ? AND deleted_at IS NOT NULL '
+        'ORDER BY deleted_at DESC',
+        (session['user_id'],)
+    ).fetchall()
+    return render_template('trash.html', files=files)
+
+
+@app.route('/files/<int:file_id>/restore', methods=['POST'])
+@login_required
+def restore_file(file_id):
+    db = database.get_db()
+    file_record = db.execute(
+        'SELECT * FROM files WHERE id = ? AND user_id = ? AND deleted_at IS NOT NULL',
+        (file_id, session['user_id'])
+    ).fetchone()
+
+    if file_record is None:
+        abort(404)
+
+    db.execute('UPDATE files SET deleted_at = NULL WHERE id = ?', (file_id,))
+    db.commit()
+    flash(f'"{file_record["original_filename"]}" was restored.')
+    return redirect(url_for('trash'))
+
+
+@app.route('/files/<int:file_id>/purge', methods=['POST'])
+@login_required
+def purge_file(file_id):
+    db = database.get_db()
+    file_record = db.execute(
+        'SELECT * FROM files WHERE id = ? AND user_id = ? AND deleted_at IS NOT NULL',
+        (file_id, session['user_id'])
+    ).fetchone()
+
+    if file_record is None:
+        abort(404)
+
+    try:
+        s3_client.delete_object(
+            Bucket=app.config['S3_BUCKET'],
+            Key=file_record['s3_key']
+        )
+    except (ClientError, BotoCoreError) as e:
+        flash(f'Could not delete the file from storage: {e}')
+        return redirect(url_for('trash'))
+
+    # Deleting the row also deletes any of its share links, because
+    # shares.file_id has ON DELETE CASCADE (and db.py turns on
+    # PRAGMA foreign_keys, so SQLite actually enforces it).
+    db.execute('DELETE FROM files WHERE id = ?', (file_id,))
+    db.commit()
+    flash(f'"{file_record["original_filename"]}" was permanently deleted.')
+    return redirect(url_for('trash'))
+
+
+# ---------------------------------------------------------------------
+# Sharing
+# ---------------------------------------------------------------------
+
+SHARE_EXPIRY_CHOICES = {
+    '1h': timedelta(hours=1),
+    '1d': timedelta(days=1),
+    '7d': timedelta(days=7),
+    'never': None,
+}
+
+
+def _now_str():
+    """UTC 'now' formatted the same way SQLite writes CURRENT_TIMESTAMP
+    ('YYYY-MM-DD HH:MM:SS'), so it can be bound as a plain string and
+    compared directly against TIMESTAMP columns. We deliberately never
+    bind a raw Python datetime object as a query parameter here --
+    that relies on sqlite3's default datetime adapter, which is
+    deprecated as of Python 3.12."""
+    return datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+
+
+@app.route('/files/<int:file_id>/share', methods=['GET', 'POST'])
+@login_required
+def manage_share(file_id):
+    db = database.get_db()
+    file_record = db.execute(
+        'SELECT * FROM files WHERE id = ? AND user_id = ? AND deleted_at IS NULL',
+        (file_id, session['user_id'])
+    ).fetchone()
+
+    if file_record is None:
+        abort(404)
+
+    if request.method == 'POST':
+        choice = request.form.get('expires_in', '7d')
+        delta = SHARE_EXPIRY_CHOICES.get(choice, SHARE_EXPIRY_CHOICES['7d'])
+        expires_at = (datetime.utcnow() + delta).strftime('%Y-%m-%d %H:%M:%S') if delta else None
+        token = secrets.token_urlsafe(32)
+
+        db.execute(
+            'INSERT INTO shares (file_id, token, created_by, expires_at) '
+            'VALUES (?, ?, ?, ?)',
+            (file_id, token, session['user_id'], expires_at)
+        )
+        db.commit()
+        flash('Share link created.')
+        return redirect(url_for('manage_share', file_id=file_id))
+
+    active_share = db.execute(
+        'SELECT * FROM shares WHERE file_id = ? AND revoked = 0 '
+        'AND (expires_at IS NULL OR expires_at > ?) '
+        'ORDER BY created_at DESC LIMIT 1',
+        (file_id, _now_str())
+    ).fetchone()
+
+    share_url = None
+    if active_share is not None:
+        share_url = url_for('shared_file', token=active_share['token'], _external=True)
+
+    return render_template(
+        'share.html', file=file_record, active_share=active_share, share_url=share_url
+    )
+
+
+@app.route('/files/<int:file_id>/share/revoke', methods=['POST'])
+@login_required
+def revoke_share(file_id):
+    db = database.get_db()
+    file_record = db.execute(
+        'SELECT id FROM files WHERE id = ? AND user_id = ?',
+        (file_id, session['user_id'])
+    ).fetchone()
+
+    if file_record is None:
+        abort(404)
+
+    db.execute('UPDATE shares SET revoked = 1 WHERE file_id = ? AND revoked = 0', (file_id,))
+    db.commit()
+    flash('Share link revoked.')
+    return redirect(url_for('manage_share', file_id=file_id))
+
+
+def _get_valid_share(token):
+    """Look up a share by token, joined with its file. Returns None
+    unless the share exists, is not revoked, has not expired, AND its
+    file is not sitting in Trash. (If the owner restores the file, a
+    previously-created link becomes valid again automatically.)"""
+    db = database.get_db()
+    return db.execute(
+        'SELECT shares.id AS share_id, shares.token, shares.expires_at, '
+        '       shares.access_count, '
+        '       files.id AS file_id, files.original_filename, '
+        '       files.s3_key, files.file_size '
+        'FROM shares JOIN files ON files.id = shares.file_id '
+        'WHERE shares.token = ? AND shares.revoked = 0 '
+        'AND files.deleted_at IS NULL '
+        'AND (shares.expires_at IS NULL OR shares.expires_at > ?)',
+        (token, _now_str())
+    ).fetchone()
+
+
+@app.route('/shared/<token>')
+def shared_file(token):
+    share = _get_valid_share(token)
+    if share is None:
+        abort(404)
+
+    extension = share['original_filename'].rsplit('.', 1)[-1].lower()
+    previewable = extension in PREVIEWABLE_EXTENSIONS
+    return render_template('shared_file.html', share=share, previewable=previewable)
+
+
+@app.route('/shared/<token>/download')
+def shared_download(token):
+    share = _get_valid_share(token)
+    if share is None:
+        abort(404)
+
+    db = database.get_db()
+    db.execute('UPDATE shares SET access_count = access_count + 1 WHERE id = ?', (share['share_id'],))
+    db.commit()
+
+    try:
+        presigned_url = s3_client.generate_presigned_url(
+            'get_object',
+            Params={
+                'Bucket': app.config['S3_BUCKET'],
+                'Key': share['s3_key'],
+                'ResponseContentDisposition':
+                    f'attachment; filename="{share["original_filename"]}"'
+            },
+            ExpiresIn=app.config['PRESIGNED_URL_EXPIRY']
+        )
+    except (ClientError, BotoCoreError) as e:
+        flash(f'Could not generate a download link: {e}')
+        return redirect(url_for('shared_file', token=token))
+
+    return redirect(presigned_url)
+
+
+@app.route('/shared/<token>/view')
+def shared_view(token):
+    share = _get_valid_share(token)
+    if share is None:
+        abort(404)
+
+    extension = share['original_filename'].rsplit('.', 1)[-1].lower()
+    if extension not in PREVIEWABLE_EXTENSIONS:
+        abort(404)
+
+    content_type, _ = mimetypes.guess_type(share['original_filename'])
+    if content_type is None:
+        content_type = 'application/octet-stream'
+
+    db = database.get_db()
+    db.execute('UPDATE shares SET access_count = access_count + 1 WHERE id = ?', (share['share_id'],))
+    db.commit()
+
+    try:
+        presigned_url = s3_client.generate_presigned_url(
+            'get_object',
+            Params={
+                'Bucket': app.config['S3_BUCKET'],
+                'Key': share['s3_key'],
+                'ResponseContentDisposition':
+                    f'inline; filename="{share["original_filename"]}"',
+                'ResponseContentType': content_type
+            },
+            ExpiresIn=app.config['PRESIGNED_URL_EXPIRY']
+        )
+    except (ClientError, BotoCoreError) as e:
+        flash(f'Could not generate a preview link: {e}')
+        return redirect(url_for('shared_file', token=token))
+
+    return redirect(presigned_url)
+
 
 # ---------------------------------------------------------------------
 # Error handlers

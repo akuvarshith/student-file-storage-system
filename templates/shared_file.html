@@ -1,0 +1,12 @@
+{% extends 'base.html' %}
+{% block title %}Shared File{% endblock %}
+{% block content %}
+<h1>{{ share['original_filename'] }}</h1>
+<p class="hint">{{ (share['file_size'] / 1024) | round(1) }} KB &middot; shared via Student File Storage</p>
+<div>
+    {% if previewable %}
+        <a class="btn" href="{{ url_for('shared_view', token=share['token']) }}" target="_blank">View</a>
+    {% endif %}
+    <a class="btn btn-secondary" href="{{ url_for('shared_download', token=share['token']) }}">Download</a>
+</div>
+{% endblock %}

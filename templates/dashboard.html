@@ -3,8 +3,33 @@
 {% block content %}
 <h1>Welcome, {{ g.user['name'] }}</h1>
 <p>You currently have <strong>{{ file_count }}</strong> file(s) stored.</p>
+
+<div class="storage-box">
+    <p class="hint">
+        {{ (storage_used / (1024*1024)) | round(1) }} MB used of
+        {{ (storage_quota / (1024*1024)) | round(0) | int }} MB
+    </p>
+    <div class="progress-bar">
+        <div class="progress-bar-fill" style="width: {{ storage_percent }}%;"></div>
+    </div>
+</div>
+
+{% if category_breakdown %}
+<table class="files-table breakdown-table">
+    <thead>
+        <tr><th>Category</th><th>Files</th></tr>
+    </thead>
+    <tbody>
+        {% for row in category_breakdown %}
+        <tr><td>{{ row['category'] }}</td><td>{{ row['c'] }}</td></tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endif %}
+
 <div class="dashboard-links">
     <a class="btn" href="{{ url_for('upload') }}">Upload a New File</a>
     <a class="btn btn-secondary" href="{{ url_for('my_files') }}">View My Files</a>
+    <a class="btn btn-secondary" href="{{ url_for('trash') }}">Trash</a>
 </div>
 {% endblock %}

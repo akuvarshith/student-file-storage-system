@@ -5,6 +5,12 @@
 <form method="post" enctype="multipart/form-data" class="form">
     <label for="file">Choose File</label>
     <input type="file" id="file" name="file" required>
+    <label for="category">Category</label>
+    <select id="category" name="category">
+        {% for c in categories %}
+        <option value="{{ c }}" {% if c == 'Other' %}selected{% endif %}>{{ c }}</option>
+        {% endfor %}
+    </select>
     <button type="submit" class="btn">Upload</button>
 </form>
 <p class="hint">Allowed types: pdf, doc, docx, ppt, pptx, xls, xlsx, txt, png, jpg, jpeg, zip. Maximum size: 16&nbsp;MB.</p>

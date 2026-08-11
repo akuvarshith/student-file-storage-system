@@ -111,3 +111,93 @@ body {
 .hint { color: #6b7280; font-size: 0.85rem; margin-top: 12px; }
 
 .dashboard-links { margin-top: 20px; }
+
+/* --- Added for: search/filter, favorites, categories, share, trash --- */
+
+.filter-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+    background: #fff;
+    padding: 16px;
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    margin-bottom: 20px;
+}
+
+.filter-bar input[type="text"],
+.filter-bar select {
+    padding: 8px 10px;
+    border: 1px solid #d2d6dc;
+    border-radius: 6px;
+    font-size: 0.9rem;
+}
+
+.checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.9rem;
+    color: #4b5563;
+}
+
+.badge {
+    display: inline-block;
+    background: #e5e7eb;
+    color: #374151;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 0.75rem;
+}
+
+.star-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 1.1rem;
+    color: #f59e0b;
+    padding: 0;
+}
+
+.inline-form {
+    display: inline-block;
+    margin: 0;
+}
+
+.actions-cell { white-space: nowrap; }
+
+.btn-danger { background: #dc2626; }
+.btn-danger:hover { background: #b91c1c; }
+
+.share-box, .storage-box {
+    background: #fff;
+    padding: 20px;
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    margin-bottom: 20px;
+}
+
+.share-link-input {
+    width: 100%;
+    padding: 10px;
+    border: 1px solid #d2d6dc;
+    border-radius: 6px;
+    font-size: 0.9rem;
+    margin: 8px 0;
+}
+
+.progress-bar {
+    width: 100%;
+    height: 10px;
+    background: #e5e7eb;
+    border-radius: 999px;
+    overflow: hidden;
+}
+
+.progress-bar-fill {
+    height: 100%;
+    background: #2563eb;
+}
+
+.breakdown-table { margin-top: 16px; }
